@@ -10,6 +10,7 @@ const SOURCES = [
   { id: "all", label: "All sources" },
   { id: "linkedin", label: "LinkedIn" },
   { id: "indeed", label: "Indeed" },
+  { id: "linkedin_post", label: "LinkedIn posts" },
 ];
 const CACHE_KEY = "neurohire:v1";
 const CACHE_MS = 60 * 60 * 1000;
@@ -250,7 +251,7 @@ export default function Home() {
                       )}
                     </div>
                     {ageHours(j.date_posted) < 24 && <span className="tag today">New</span>}
-                    <span className="tag">{j.site}</span>
+                    <span className="tag">{j.site === "linkedin_post" ? "LinkedIn post" : j.site}</span>
                   </div>
                 </li>
               ))}

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
@@ -43,7 +44,7 @@ TITLE_INCLUDE = re.compile(
     re.I,
 )
 TITLE_EXCLUDE = re.compile(
-    r"senior|\bsr\b|\blead\b|principal|staff|manager|director|\bhead\b|architect"
+    r"senior|\bsr\b|\blead\b|princip(?:al|le)|staff|manager|director|\bhead\b|architect"
     r"|\b(ii|iii|iv|v)\b|industrial|telecom|voip|mechanical|electrical|civil"
     r"|\d+\s*[-–]\s*\d+\s*years?|\b[3-9]\+?\s*years?",
     re.I,
@@ -126,6 +127,7 @@ IGNORED_EMAIL = re.compile(r"linkedin|indeed|example\.|sentry|\.(png|jpe?g|gif|s
 _NUM = r"(\d{1,2})\s*\+?\s*(?:(?:-|\u2013|to)\s*(\d{1,2})\s*\+?)?\s*(?:years?|yrs?)\b"
 YEARS_BEFORE = re.compile(_NUM + r"[^.\n]{0,40}?experience", re.I)
 YEARS_AFTER = re.compile(r"experience[^.\n]{0,30}?" + _NUM, re.I)
+DROPPED_URLS: set = set()  # jobs rejected for experience; removed from the DB on save
 MAX_YEARS = 1  # entry level: drop jobs asking for more than this many years
 
 
@@ -146,12 +148,17 @@ def _min_years(text: str):
 
 
 def _linkedin_description(url: str) -> str:
-    try:
-        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-    except requests.RequestException:
-        return ""
-    m = re.search(r'show-more-less-html__markup[^>]*>(.*?)</div>', r.text, re.S) if r.ok else None
-    return html.unescape(re.sub(r"<[^>]+>", " ", m.group(1))) if m else ""
+    # LinkedIn rate-limits (429) bursts of page fetches, so retry with backoff.
+    for attempt in range(3):
+        try:
+            r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+            if r.ok:
+                m = re.search(r"show-more-less-html__markup[^>]*>(.*?)</div>", r.text, re.S)
+                return html.unescape(re.sub(r"<[^>]+>", " ", m.group(1))) if m else ""
+        except requests.RequestException:
+            pass
+        time.sleep(2 * (attempt + 1))
+    return ""
 
 
 def _enrich(df: pd.DataFrame) -> pd.DataFrame:
@@ -163,13 +170,93 @@ def _enrich(df: pd.DataFrame) -> pd.DataFrame:
     text = df["description"].fillna("") if "description" in df else pd.Series("", index=df.index)
     todo = df.index[(text.str.len() == 0) & (df["site"] == "linkedin")]
     if len(todo):
-        with ThreadPoolExecutor(8) as pool:
+        with ThreadPoolExecutor(4) as pool:
             for idx, desc in zip(todo, pool.map(_linkedin_description, df.loc[todo, "job_url"])):
                 text.at[idx] = desc
 
     years = text.apply(_min_years)
     df["emails"] = text.apply(lambda t: ",".join(_find_emails(t)) or None)
-    return df[~(years.fillna(0) > MAX_YEARS)]
+    too_senior = years.fillna(0) > MAX_YEARS
+    DROPPED_URLS.update(df.loc[too_senior, "job_url"])
+    return df[~too_senior]
+
+
+# ---------- LinkedIn posts (via Serper.dev Google search) ----------
+SERPER_URL = "https://google.serper.dev/search"
+_ROLE = '("software engineer" OR developer OR "AI engineer" OR "machine learning" OR "data scientist")'
+_LEVEL = '(junior OR fresher OR "entry level" OR associate OR intern OR graduate)'
+POST_QUERIES = {
+    False: f'site:linkedin.com/posts hiring {_ROLE} Lahore {_LEVEL}',
+    True: f'site:linkedin.com/posts hiring remote {_ROLE} {_LEVEL}',
+}
+SENIOR_RE = re.compile(r"senior|\bsr\b|\blead\b|princip(?:al|le)|\bstaff\b|architect|manager|director", re.I)
+NOT_A_JOB_RE = re.compile(r"open to work|resume|\bmy cv\b|seeking|i am looking|i'm looking|available for hire", re.I)
+AUTHOR_RE = re.compile(r"^(.+?)(?:['\u2019]s Post| posted this| on LinkedIn:)", re.I)
+JOB_TITLE_RE = re.compile(
+    r"\b(?:(?:junior|jr\.?|associate|entry[- ]level|trainee|intern|graduate|fresh(?:er)?|full[- ]?stack|front[- ]?end|back[- ]?end"
+    r"|software|ai|ml|machine learning|data|python|react|node|flutter|java|devops|mern|django|laravel|web|mobile)\s+){0,4}"
+    r"(?:engineer|developer|scientist|analyst|intern)s?\b(?:\s*\([^)]{1,25}\))?",
+    re.I,
+)
+HIRING_RE = re.compile(r"hiring|vacanc|opening|looking for|join (?:our|us)|apply|send (?:your )?(?:cv|resume)", re.I)
+
+
+def _post_date(raw, now):
+    """Serper gives '3 days ago', '5 hours ago' or 'Oct 20, 2026'; fall back to now."""
+    if raw:
+        m = re.match(r"(\d+)\s+(minute|hour|day|week)s?\s+ago", raw)
+        if m:
+            unit = {"minute": 1 / 60, "hour": 1, "day": 24, "week": 168}[m.group(1 + 1)]
+            return now - pd.Timedelta(hours=int(m.group(1)) * unit)
+        try:
+            return pd.to_datetime(raw, utc=True)
+        except (ValueError, TypeError):
+            pass
+    return now
+
+
+def _posts(remote: bool) -> pd.DataFrame:
+    key = os.environ.get("SERPER_API_KEY")
+    if not key:
+        return pd.DataFrame(columns=COLUMNS)
+    try:
+        r = requests.post(
+            SERPER_URL, timeout=20,
+            headers={"X-API-KEY": key, "Content-Type": "application/json"},
+            json={"q": POST_QUERIES[remote], "tbs": "qdr:d3", "num": 10, "gl": "pk" if not remote else "us"},
+        )
+        r.raise_for_status()
+        results = r.json().get("organic", [])
+    except (requests.RequestException, ValueError) as exc:
+        print(f"serper failed (remote={remote}): {exc}", file=sys.stderr)
+        return pd.DataFrame(columns=COLUMNS)
+
+    now = pd.Timestamp.now(tz="UTC")
+    rows = []
+    for item in results:
+        link, title, snippet = item.get("link", ""), item.get("title", ""), item.get("snippet", "")
+        if "linkedin.com/posts" not in link:
+            continue
+        text = f"{title} {snippet}"
+        if (not HIRING_RE.search(text) or NOT_A_JOB_RE.search(snippet) or SENIOR_RE.search(text)
+                or (_min_years(text) or 0) > MAX_YEARS):
+            continue
+        if (not remote and "lahore" not in text.lower()) or (remote and "remote" not in text.lower()):
+            continue
+        clean = re.sub(r"\s+", " ", re.sub(r"[*#\u2026]", " ", snippet)).strip(" .-|")
+        m = JOB_TITLE_RE.search(clean)
+        role = (m.group(0) if m else clean).strip(" -:|.")[:110].title() if m else clean[:110]
+        a = AUTHOR_RE.match(title)
+        rows.append({
+            "title": role, "company": a.group(1).strip() if a else "LinkedIn post",
+            "location": "Lahore, Pakistan" if not remote else "Remote",
+            "is_remote": remote, "job_type": None,
+            "date_posted": _post_date(item.get("date"), now),
+            "min_amount": None, "max_amount": None, "currency": None,
+            "site": "linkedin_post", "job_url": link.split("?")[0],
+            "emails": ",".join(_find_emails(text)) or None,
+        })
+    return pd.DataFrame(rows, columns=COLUMNS)
 
 
 def _to_records(df: pd.DataFrame) -> list:
@@ -177,9 +264,18 @@ def _to_records(df: pd.DataFrame) -> list:
     return json.loads(df.to_json(orient="records", date_format="iso"))
 
 
+def _with_posts(jobs: pd.DataFrame, remote: bool) -> pd.DataFrame:
+    df = pd.concat([d for d in (jobs, _posts(remote)) if not d.empty], ignore_index=True)
+    if df.empty:
+        return jobs
+    df["date_posted"] = pd.to_datetime(df["date_posted"], utc=True)  # jobspy gives plain dates
+    df = df.drop_duplicates(subset="job_url")
+    return df.sort_values("date_posted", ascending=False, na_position="last")
+
+
 def build_payload() -> dict:
-    lahore = _fetch(remote=False)
-    remote = _fetch(remote=True)
+    lahore = _with_posts(_fetch(remote=False), remote=False)
+    remote = _with_posts(_fetch(remote=True), remote=True)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "hours_old": HOURS_OLD,
@@ -219,9 +315,10 @@ VALUES (%(job_url)s, %(bucket)s, %(title)s, %(company)s, %(location)s, %(is_remo
 ON CONFLICT (job_url) DO UPDATE SET
     bucket = EXCLUDED.bucket, title = EXCLUDED.title, company = EXCLUDED.company,
     location = EXCLUDED.location, is_remote = EXCLUDED.is_remote,
-    job_type = EXCLUDED.job_type, date_posted = EXCLUDED.date_posted,
+    job_type = EXCLUDED.job_type,
+    date_posted = CASE WHEN jobs.site = 'linkedin_post' THEN jobs.date_posted ELSE EXCLUDED.date_posted END,
     min_amount = EXCLUDED.min_amount, max_amount = EXCLUDED.max_amount,
-    currency = EXCLUDED.currency, site = EXCLUDED.site, emails = EXCLUDED.emails, last_seen = now()
+    currency = EXCLUDED.currency, site = EXCLUDED.site, emails = COALESCE(EXCLUDED.emails, jobs.emails), last_seen = now()
 """
 
 
@@ -233,6 +330,8 @@ def save_jobs(payload: dict) -> int:
     ]
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
         conn.execute(SCHEMA)
+        if DROPPED_URLS:
+            conn.execute("DELETE FROM jobs WHERE job_url = ANY(%s)", [list(DROPPED_URLS)])
         with conn.cursor() as cur:
             cur.executemany(UPSERT, rows)
     return len(rows)
