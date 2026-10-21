@@ -1,3 +1,4 @@
 python-jobspy
 pandas
 pymupdf
+psycopg[binary]
