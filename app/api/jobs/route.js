@@ -10,7 +10,7 @@ export async function GET() {
     const sql = neon(process.env.DATABASE_URL);
     const rows = await sql`
       SELECT bucket, title, company, location, is_remote, job_type, date_posted,
-             min_amount, max_amount, currency, site, job_url, last_seen
+             min_amount, max_amount, currency, site, job_url, emails, last_seen
       FROM jobs
       WHERE date_posted > now() - make_interval(hours => ${HOURS_OLD})
       ORDER BY date_posted DESC NULLS LAST`;

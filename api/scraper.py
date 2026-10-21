@@ -14,11 +14,13 @@ import json
 import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 
 import pandas as pd
 import psycopg
+import requests
 from jobspy import scrape_jobs
 
 HOURS_OLD = 72
@@ -48,7 +50,7 @@ TITLE_EXCLUDE = re.compile(
 
 COLUMNS = [
     "title", "company", "location", "is_remote", "job_type", "date_posted",
-    "min_amount", "max_amount", "currency", "site", "job_url",
+    "min_amount", "max_amount", "currency", "site", "job_url", "emails",
 ]
 
 
@@ -113,7 +115,39 @@ def _fetch(remote: bool) -> pd.DataFrame:
     for col in COLUMNS:
         if col not in df.columns:
             df[col] = None
-    return df[COLUMNS]
+    return _add_emails(df[COLUMNS])
+
+
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+IGNORED_EMAIL = re.compile(r"linkedin|indeed|example\.|sentry|\.(png|jpe?g|gif|svg|webp)$", re.I)
+
+
+def _find_emails(text: str) -> list:
+    found = {e.lower() for e in EMAIL_RE.findall(text or "") if not IGNORED_EMAIL.search(e)}
+    return sorted(found)
+
+
+def _linkedin_emails(url: str) -> list:
+    try:
+        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        return _find_emails(r.text) if r.ok else []
+    except requests.RequestException:
+        return []
+
+
+def _add_emails(df: pd.DataFrame) -> pd.DataFrame:
+    """Indeed gives emails found in the description; LinkedIn needs its page fetched."""
+    df = df.copy()
+    emails = df["emails"].apply(
+        lambda v: _find_emails(" ".join(v)) if isinstance(v, (list, tuple)) else _find_emails(v if isinstance(v, str) else "")
+    )
+    todo = df.index[(emails.str.len() == 0) & (df["site"] == "linkedin")]
+    if len(todo):
+        with ThreadPoolExecutor(8) as pool:
+            for idx, found in zip(todo, pool.map(_linkedin_emails, df.loc[todo, "job_url"])):
+                emails.at[idx] = found
+    df["emails"] = emails.apply(lambda e: ",".join(e) or None)
+    return df
 
 
 def _to_records(df: pd.DataFrame) -> list:
@@ -147,23 +181,25 @@ CREATE TABLE IF NOT EXISTS jobs (
     max_amount  DOUBLE PRECISION,
     currency    TEXT,
     site        TEXT,
+    emails      TEXT,
     first_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS emails TEXT;
 CREATE INDEX IF NOT EXISTS jobs_bucket_posted ON jobs (bucket, date_posted DESC);
 """
 
 UPSERT = """
 INSERT INTO jobs (job_url, bucket, title, company, location, is_remote, job_type,
-                  date_posted, min_amount, max_amount, currency, site)
+                  date_posted, min_amount, max_amount, currency, site, emails)
 VALUES (%(job_url)s, %(bucket)s, %(title)s, %(company)s, %(location)s, %(is_remote)s,
-        %(job_type)s, %(date_posted)s, %(min_amount)s, %(max_amount)s, %(currency)s, %(site)s)
+        %(job_type)s, %(date_posted)s, %(min_amount)s, %(max_amount)s, %(currency)s, %(site)s, %(emails)s)
 ON CONFLICT (job_url) DO UPDATE SET
     bucket = EXCLUDED.bucket, title = EXCLUDED.title, company = EXCLUDED.company,
     location = EXCLUDED.location, is_remote = EXCLUDED.is_remote,
     job_type = EXCLUDED.job_type, date_posted = EXCLUDED.date_posted,
     min_amount = EXCLUDED.min_amount, max_amount = EXCLUDED.max_amount,
-    currency = EXCLUDED.currency, site = EXCLUDED.site, last_seen = now()
+    currency = EXCLUDED.currency, site = EXCLUDED.site, emails = EXCLUDED.emails, last_seen = now()
 """
 
 
