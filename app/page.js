@@ -11,7 +11,7 @@ const SOURCES = [
   { id: "linkedin", label: "LinkedIn" },
   { id: "indeed", label: "Indeed" },
 ];
-const CACHE_KEY = "jobhound:v1";
+const CACHE_KEY = "neurohire:v1";
 const CACHE_MS = 60 * 60 * 1000;
 
 const ICONS = {
@@ -21,8 +21,9 @@ const ICONS = {
   spark: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" />,
   clock: <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-13v4.5l3 1.5" />,
   refresh: <path d="M20 11a8 8 0 0 0-14.5-3.5L4 9m0-5v5h5M4 13a8 8 0 0 0 14.5 3.5L20 15m0 5v-5h-5" />,
-  sun: <path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0-13v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" />,
-  moon: <path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" />,
+  copy: <path d="M9 9h10v11H9V9Zm-4 6V4h10M" />,
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  mail: <path d="M4 6h16v12H4V6Zm0 1 8 6 8-6" />,
 };
 
 function Icon({ name, size = 18 }) {
@@ -81,17 +82,14 @@ export default function Home() {
   const [tab, setTab] = useState(TABS[0].key);
   const [source, setSource] = useState("all");
   const [query, setQuery] = useState("");
-  const [theme, setTheme] = useState("light");
+  const [copied, setCopied] = useState(null);
 
-  useEffect(() => {
-    setTheme(document.documentElement.dataset.theme || "light");
-  }, []);
-
-  function toggleTheme() {
-    const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("jobhound:theme", next); } catch {}
+  async function copyEmail(email) {
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopied(email);
+      setTimeout(() => setCopied((c) => (c === email ? null : c)), 1500);
+    } catch {}
   }
 
   async function load(force = false) {
@@ -135,7 +133,7 @@ export default function Home() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark"><Icon name="briefcase" size={18} /></div>
-          <span className="brand-name">JobHound</span>
+          <span className="brand-name">NeuroHire</span>
         </div>
         <div className="nav-label">Job feeds</div>
         {TABS.map((t) => (
@@ -159,12 +157,11 @@ export default function Home() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <button className="icon-btn" onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme">
-            <Icon name={theme === "dark" ? "sun" : "moon"} />
-          </button>
         </header>
 
         <div className="page">
+          <h2 className="welcome">Welcome <span className="rainbow">Hashir Ashraf</span></h2>
+
           <div className="page-header">
             <div className="period-filter">
               {SOURCES.map((s) => (
@@ -227,19 +224,33 @@ export default function Home() {
             <ul className="jobs">
               {jobs.map((j, i) => (
                 <li key={j.job_url}>
-                  <a className="job" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }} href={j.job_url} target="_blank" rel="noopener noreferrer">
+                  <div className="job" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
                     <div className="job-body">
-                      <h2>{j.title}</h2>
+                      <h2>
+                        <a href={j.job_url} target="_blank" rel="noopener noreferrer">{j.title}</a>
+                      </h2>
                       <p className="company">{j.company}</p>
                       <p className="meta">
                         <span>{j.location}</span>
                         <span>{timeAgo(j.date_posted)}</span>
                         {salary(j) && <span>{salary(j)}</span>}
                       </p>
+                      {j.emails && (
+                        <p className="emails">
+                          {j.emails.split(",").map((email) => (
+                            <button key={email} className="email-chip" onClick={() => copyEmail(email)} title="Copy email">
+                              <Icon name="mail" size={13} />
+                              {email}
+                              <Icon name={copied === email ? "check" : "copy"} size={13} />
+                              {copied === email && <span className="copied">Copied</span>}
+                            </button>
+                          ))}
+                        </p>
+                      )}
                     </div>
                     {ageHours(j.date_posted) < 24 && <span className="tag today">New</span>}
                     <span className="tag">{j.site}</span>
-                  </a>
+                  </div>
                 </li>
               ))}
             </ul>

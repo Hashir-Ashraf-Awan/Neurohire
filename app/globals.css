@@ -1,6 +1,5 @@
 /* Design tokens mirrored from Neubolt-Admin (scss/settings/neubolt-tokens.scss) */
-:root,
-html[data-theme="light"] {
+:root {
   --nb-brand: #112a46;
   --nb-brand-hover: #1d3f66;
   --nb-brand-soft: rgba(17, 42, 70, 0.08);
@@ -32,38 +31,8 @@ html[data-theme="light"] {
     radial-gradient(600px 380px at 70% 100%, color-mix(in srgb, var(--nb-info) 6%, transparent), transparent 50%);
 }
 
-html[data-theme="dark"] {
-  --nb-brand: #8ebae6;
-  --nb-brand-hover: #a8cbf0;
-  --nb-brand-soft: rgba(142, 186, 230, 0.12);
-  --nb-bg: #0a101c;
-  --nb-surface: #111827;
-  --nb-surface-2: #172033;
-  --nb-border: rgba(148, 163, 184, 0.12);
-  --nb-border-strong: rgba(148, 163, 184, 0.22);
-  --nb-text: #e8eef6;
-  --nb-text-muted: #9aa8bc;
-  --nb-heading: #f5f8fc;
-  --nb-sidebar-bg: #0d1524;
-  --nb-sidebar-text: #c5d0de;
-  --nb-nav-active: #1a3354;
-  --nb-nav-hover: rgba(148, 163, 184, 0.07);
-  --nb-header-bg: rgba(13, 21, 36, 0.92);
-  --nb-success: #2dd4bf;
-  --nb-info: #38bdf8;
-  --nb-danger: #f87171;
-  --nb-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(148, 163, 184, 0.04);
-  --nb-shadow-md: 0 10px 28px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(148, 163, 184, 0.06);
-  --nb-focus-ring: 0 0 0 3px rgba(142, 186, 230, 0.26);
-  --nb-on-brand: #0a101c;
-  --nb-mesh:
-    radial-gradient(900px 480px at 12% -10%, color-mix(in srgb, var(--nb-brand) 16%, transparent), transparent 60%),
-    radial-gradient(700px 420px at 92% 8%, color-mix(in srgb, var(--nb-success) 10%, transparent), transparent 55%),
-    radial-gradient(600px 380px at 70% 100%, color-mix(in srgb, var(--nb-info) 8%, transparent), transparent 50%);
-}
-
 * { box-sizing: border-box; }
-html { color-scheme: light dark; }
+html { color-scheme: light; }
 body {
   margin: 0;
   font-family: var(--font-public-sans), "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -125,11 +94,6 @@ button { cursor: pointer; }
   width: min(320px, 40vw); padding: 8px 12px; border-radius: 999px;
   border: 1px solid var(--nb-border-strong); background: var(--nb-surface);
 }
-.icon-btn {
-  width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px;
-  border: 1px solid var(--nb-border); background: var(--nb-surface); color: var(--nb-text-muted);
-}
-.icon-btn:hover { color: var(--nb-brand); border-color: var(--nb-border-strong); }
 
 .page { display: flex; flex-direction: column; gap: 12px; padding: 20px 24px 40px; max-width: 1200px; width: 100%; }
 .page-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
@@ -201,6 +165,9 @@ button { cursor: pointer; }
   transition: border-color 140ms ease, box-shadow 280ms ease;
   animation: nb-fade-up 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+.job { position: relative; }
+.job h2 a { color: inherit; text-decoration: none; }
+.job h2 a::after { content: ""; position: absolute; inset: 0; border-radius: var(--nb-radius); }
 .job:hover { border-color: var(--nb-brand); box-shadow: var(--nb-shadow-md); }
 .job-body { flex: 1; min-width: 0; }
 .job h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--nb-heading); }
@@ -241,3 +208,25 @@ button { cursor: pointer; }
   .search { width: 100%; flex: 1; }
   .page { padding: 14px 12px 32px; }
 }
+
+/* ---------- welcome banner ---------- */
+.welcome { margin: 0; font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; letter-spacing: -0.3px; color: var(--nb-heading); }
+.rainbow {
+  background: linear-gradient(90deg, #ff3b30, #ff9500, #ffcc00, #34c759, #00c7be, #007aff, #5856d6, #af52de, #ff2d55, #ff3b30);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  animation: rainbow-shift 6s linear infinite;
+}
+@keyframes rainbow-shift { to { background-position: 200% 0; } }
+@media (prefers-reduced-motion: reduce) { .rainbow { animation: none; } }
+
+/* ---------- email chips ---------- */
+.emails { margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 6px; position: relative; z-index: 1; }
+.email-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--nb-border-strong); background: var(--nb-surface); color: var(--nb-heading);
+  font-size: 12px; font-weight: 600;
+}
+.email-chip:hover { border-color: var(--nb-brand); background: var(--nb-brand-soft); }
+.email-chip .copied { color: var(--nb-success); }
