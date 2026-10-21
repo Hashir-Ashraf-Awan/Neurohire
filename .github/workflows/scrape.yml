@@ -1,0 +1,25 @@
+name: Scrape jobs
+
+on:
+  schedule:
+    - cron: "0 * * * *" # every hour (UTC); GitHub may delay runs by a few minutes
+  workflow_dispatch: {}
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger scraper
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITE_URL: ${{ vars.SITE_URL || 'https://jobhound-beige.vercel.app' }}
+        run: |
+          status=$(curl -sS -m 330 -o response.json -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" "$SITE_URL/api/scraper")
+          cat response.json; echo
+          [ "$status" = "200" ] || { echo "Scraper returned HTTP $status"; exit 1; }

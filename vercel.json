@@ -3,11 +3,5 @@
     "api/*.py": {
       "maxDuration": 300
     }
-  },
-  "crons": [
-    {
-      "path": "/api/scraper",
-      "schedule": "0 3 * * *"
-    }
-  ]
+  }
 }
