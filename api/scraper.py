@@ -10,6 +10,7 @@ summary. The frontend reads the stored jobs via /api/jobs.
 
 Locally: `python api/scraper.py` prints the JSON, `--save` also stores it.
 """
+import html
 import json
 import os
 import re
@@ -115,11 +116,17 @@ def _fetch(remote: bool) -> pd.DataFrame:
     for col in COLUMNS:
         if col not in df.columns:
             df[col] = None
-    return _add_emails(df[COLUMNS])
+    return _enrich(df)[COLUMNS]
 
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 IGNORED_EMAIL = re.compile(r"linkedin|indeed|example\.|sentry|\.(png|jpe?g|gif|svg|webp)$", re.I)
+
+# "3+ years of experience", "2-4 yrs experience", "experience: minimum 3 years" ...
+_NUM = r"(\d{1,2})\s*\+?\s*(?:(?:-|\u2013|to)\s*(\d{1,2})\s*\+?)?\s*(?:years?|yrs?)\b"
+YEARS_BEFORE = re.compile(_NUM + r"[^.\n]{0,40}?experience", re.I)
+YEARS_AFTER = re.compile(r"experience[^.\n]{0,30}?" + _NUM, re.I)
+MAX_YEARS = 1  # entry level: drop jobs asking for more than this many years
 
 
 def _find_emails(text: str) -> list:
@@ -127,27 +134,42 @@ def _find_emails(text: str) -> list:
     return sorted(found)
 
 
-def _linkedin_emails(url: str) -> list:
+def _min_years(text: str):
+    """Largest lower bound of any "N years experience" mention, or None if none found."""
+    lows = [
+        int(m.group(1))
+        for rx in (YEARS_BEFORE, YEARS_AFTER)
+        for m in rx.finditer(text or "")
+        if int(m.group(1)) <= 15
+    ]
+    return max(lows) if lows else None
+
+
+def _linkedin_description(url: str) -> str:
     try:
         r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        return _find_emails(r.text) if r.ok else []
     except requests.RequestException:
-        return []
+        return ""
+    m = re.search(r'show-more-less-html__markup[^>]*>(.*?)</div>', r.text, re.S) if r.ok else None
+    return html.unescape(re.sub(r"<[^>]+>", " ", m.group(1))) if m else ""
 
 
-def _add_emails(df: pd.DataFrame) -> pd.DataFrame:
-    """Indeed gives emails found in the description; LinkedIn needs its page fetched."""
+def _enrich(df: pd.DataFrame) -> pd.DataFrame:
+    """Add emails and drop jobs asking for too much experience.
+
+    Indeed results carry the description; LinkedIn needs its job page fetched.
+    """
     df = df.copy()
-    emails = df["emails"].apply(
-        lambda v: _find_emails(" ".join(v)) if isinstance(v, (list, tuple)) else _find_emails(v if isinstance(v, str) else "")
-    )
-    todo = df.index[(emails.str.len() == 0) & (df["site"] == "linkedin")]
+    text = df["description"].fillna("") if "description" in df else pd.Series("", index=df.index)
+    todo = df.index[(text.str.len() == 0) & (df["site"] == "linkedin")]
     if len(todo):
         with ThreadPoolExecutor(8) as pool:
-            for idx, found in zip(todo, pool.map(_linkedin_emails, df.loc[todo, "job_url"])):
-                emails.at[idx] = found
-    df["emails"] = emails.apply(lambda e: ",".join(e) or None)
-    return df
+            for idx, desc in zip(todo, pool.map(_linkedin_description, df.loc[todo, "job_url"])):
+                text.at[idx] = desc
+
+    years = text.apply(_min_years)
+    df["emails"] = text.apply(lambda t: ",".join(_find_emails(t)) or None)
+    return df[~(years.fillna(0) > MAX_YEARS)]
 
 
 def _to_records(df: pd.DataFrame) -> list:
