@@ -10,6 +10,7 @@ const publicSans = Public_Sans({
 export const metadata = {
   title: "NeuroHire",
   description: "Entry-level software & AI/ML jobs from the last 72 hours: Lahore on-site and worldwide remote.",
+  openGraph: { title: "NeuroHire", images: ["/logo.png"] },
 };
 
 export default function RootLayout({ children }) {

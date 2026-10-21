@@ -132,8 +132,8 @@ export default function Home() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark"><Icon name="briefcase" size={18} /></div>
-          <span className="brand-name">NeuroHire</span>
+          <img className="brand-logo" src="/logo.png" alt="NeuroHire" />
+          <img className="brand-mark-img" src="/mark.png" alt="NeuroHire" />
         </div>
         <div className="nav-label">Job feeds</div>
         {TABS.map((t) => (
@@ -148,7 +148,8 @@ export default function Home() {
 
       <div className="main">
         <header className="topbar">
-          <h1>Dashboard</h1>
+          <img className="topbar-mark" src="/mark.png" alt="" />
+          <h1>NeuroHire</h1>
           <span className="spacer" />
           <input
             className="search"
@@ -211,13 +212,13 @@ export default function Home() {
             {error && <p className="state error">Couldn’t load jobs: {error}</p>}
             {loading && (
               <div className="state">
-                <div className="empty-graphic" />
+                <img className="state-logo" src="/mark.png" alt="" />
                 Loading jobs…
               </div>
             )}
             {data && jobs.length === 0 && (
               <div className="state">
-                <div className="empty-graphic" />
+                <img className="state-logo" src="/mark.png" alt="" />
                 No matching jobs.
               </div>
             )}

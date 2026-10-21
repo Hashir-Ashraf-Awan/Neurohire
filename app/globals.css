@@ -230,3 +230,16 @@ button { cursor: pointer; }
 }
 .email-chip:hover { border-color: var(--nb-brand); background: var(--nb-brand-soft); }
 .email-chip .copied { color: var(--nb-success); }
+
+/* ---------- logo ---------- */
+.brand { padding: 0 4px 14px; justify-content: center; }
+.brand-logo { width: 100%; max-width: 170px; height: auto; display: block; }
+.brand-mark-img { display: none; width: 32px; height: 32px; }
+.topbar-mark { width: 28px; height: 28px; }
+.state-logo { width: 72px; height: 72px; display: block; margin: 0 auto 14px; animation: nb-pulse 2.4s ease-in-out infinite; }
+@media (max-width: 860px) {
+  .brand-logo { display: none; }
+  .brand-mark-img { display: block; }
+  .topbar-mark { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .state-logo { animation: none; } }
